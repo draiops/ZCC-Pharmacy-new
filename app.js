@@ -1,0 +1,918 @@
+const STORAGE_KEY = "pharmacy-dashboard-state-v1";
+
+const DEMO_USERS = {
+  pharmacist: { username: "pharmacist", password: "med123", name: "Lina Hassan" },
+  physician: { username: "physician", password: "care123", name: "Dr. Omar Kareem" }
+};
+
+const defaultState = () => {
+  const saraId = createId();
+  const yousefId = createId();
+
+  return {
+    patients: [
+      { id: saraId, mrn: "MRN-1001", name: "Sara Ali", createdAt: todayISO(), lastVisit: todayISO() },
+      { id: yousefId, mrn: "MRN-1002", name: "Yousef Mahdi", createdAt: todayISO(), lastVisit: todayISO() }
+    ],
+    inventory: [
+      { id: createId(), name: "Amoxicillin", category: "Antibiotic", stock: 120, threshold: 25 },
+      { id: createId(), name: "Metformin", category: "Diabetes", stock: 88, threshold: 20 },
+      { id: createId(), name: "Paracetamol", category: "Pain Relief", stock: 18, threshold: 30 },
+      { id: createId(), name: "Salbutamol", category: "Respiratory", stock: 7, threshold: 10 }
+    ],
+    prescriptions: [
+      {
+        id: createId(),
+        date: todayISO(),
+        patientId: saraId,
+        patientMrn: "MRN-1001",
+        patientName: "Sara Ali",
+        drugName: "Metformin",
+        frequency: "Twice daily",
+        duration: "30 days",
+        prescriber: "Dr. Omar Kareem"
+      },
+      {
+        id: createId(),
+        date: todayISO(),
+        patientId: yousefId,
+        patientMrn: "MRN-1002",
+        patientName: "Yousef Mahdi",
+        drugName: "Amoxicillin",
+        frequency: "Three times daily",
+        duration: "7 days",
+        prescriber: "Dr. Ahmed Sami"
+      }
+    ]
+  };
+};
+
+let state = loadLocalState();
+let currentUser = null;
+let patientFilter = "";
+let database = null;
+let databaseReady = false;
+let usingFallbackStorage = true;
+
+const elements = {
+  app: document.getElementById("app"),
+  loginForm: document.getElementById("login-form"),
+  inventoryForm: document.getElementById("inventory-form"),
+  prescriptionForm: document.getElementById("prescription-form"),
+  loginMessage: document.getElementById("login-message"),
+  patientLookupMessage: document.getElementById("patient-lookup-message"),
+  dbStatus: document.getElementById("db-status"),
+  roleSelect: document.getElementById("role"),
+  username: document.getElementById("username"),
+  password: document.getElementById("password"),
+  roleBadge: document.getElementById("role-badge"),
+  welcomeTitle: document.getElementById("welcome-title"),
+  inventoryTable: document.getElementById("inventory-table"),
+  patientTable: document.getElementById("patient-table"),
+  prescriptionTable: document.getElementById("prescription-table"),
+  totalMedicines: document.getElementById("total-medicines"),
+  lowStockCount: document.getElementById("low-stock-count"),
+  todayPrescriptions: document.getElementById("today-prescriptions"),
+  totalPrescriptions: document.getElementById("total-prescriptions"),
+  totalPatients: document.getElementById("total-patients"),
+  logout: document.getElementById("logout"),
+  seedReset: document.getElementById("seed-reset"),
+  inventorySubmit: document.getElementById("inventory-submit"),
+  prescriptionSubmit: document.getElementById("prescription-submit"),
+  prescriptionDate: document.getElementById("prescription-date"),
+  patientMrn: document.getElementById("patient-mrn"),
+  patientName: document.getElementById("patient-name"),
+  patientSearch: document.getElementById("patient-search"),
+  prescribedDrug: document.getElementById("prescribed-drug"),
+  prescriber: document.getElementById("prescriber")
+};
+
+elements.prescriptionDate.value = todayISO();
+
+elements.loginForm.addEventListener("submit", handleLogin);
+elements.inventoryForm.addEventListener("submit", handleInventorySave);
+elements.prescriptionForm.addEventListener("submit", handlePrescriptionSave);
+elements.logout.addEventListener("click", logout);
+elements.seedReset.addEventListener("click", resetDemoData);
+elements.patientMrn.addEventListener("input", handleMrnLookup);
+elements.patientSearch.addEventListener("input", (event) => {
+  patientFilter = event.currentTarget.value.trim();
+  renderPatients();
+  renderPrescriptions();
+});
+
+render();
+initializeDatabase();
+
+async function initializeDatabase() {
+  setDatabaseStatus("Local fallback", "info");
+
+  const config = await loadSupabaseConfig();
+  if (!config) {
+    setDatabaseStatus("Local fallback", "warn");
+    return;
+  }
+
+  database = createSupabaseStore(config);
+
+  try {
+    state = await database.loadState();
+    databaseReady = true;
+    usingFallbackStorage = false;
+    persistLocalState();
+    setDatabaseStatus("Supabase connected", "success");
+    render();
+  } catch (error) {
+    console.error(error);
+    database = null;
+    databaseReady = false;
+    usingFallbackStorage = true;
+    setDatabaseStatus("Supabase unavailable", "error");
+  }
+}
+
+async function loadSupabaseConfig() {
+  const inlineConfig = window.PHARMACY_CONFIG || {};
+  if (inlineConfig.supabaseUrl && inlineConfig.supabaseAnonKey) {
+    return normalizeConfig(inlineConfig);
+  }
+
+  try {
+    const response = await fetch("/api/config", { headers: { Accept: "application/json" } });
+    if (!response.ok) {
+      return null;
+    }
+    return normalizeConfig(await response.json());
+  } catch (error) {
+    return null;
+  }
+}
+
+function normalizeConfig(config) {
+  const supabaseUrl = String(config.supabaseUrl || "").replace(/\/+$/, "");
+  const supabaseAnonKey = String(config.supabaseAnonKey || "");
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return null;
+  }
+
+  return { supabaseUrl, supabaseAnonKey };
+}
+
+function createSupabaseStore(config) {
+  const restUrl = `${config.supabaseUrl}/rest/v1`;
+  const baseHeaders = {
+    apikey: config.supabaseAnonKey,
+    Authorization: `Bearer ${config.supabaseAnonKey}`,
+    "Content-Type": "application/json"
+  };
+
+  async function request(path, options = {}) {
+    const response = await fetch(`${restUrl}${path}`, {
+      ...options,
+      headers: {
+        ...baseHeaders,
+        ...(options.headers || {})
+      }
+    });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`Supabase request failed: ${response.status} ${detail}`);
+    }
+
+    if (response.status === 204) {
+      return null;
+    }
+
+    return response.json();
+  }
+
+  async function loadState() {
+    const [patientsRaw, inventoryRaw, prescriptionsRaw] = await Promise.all([
+      request("/patients?select=*&order=last_visit.desc,name.asc"),
+      request("/inventory?select=*&order=name.asc"),
+      request("/prescriptions?select=*&order=date.desc,created_at.desc")
+    ]);
+
+    const patients = patientsRaw.map(fromDbPatient);
+    const patientsById = new Map(patients.map((patient) => [patient.id, patient]));
+    const prescriptions = prescriptionsRaw.map((entry) => fromDbPrescription(entry, patientsById));
+
+    return {
+      patients,
+      inventory: inventoryRaw.map(fromDbInventory),
+      prescriptions
+    };
+  }
+
+  async function upsertPatient(patient) {
+    const rows = await request("/patients?on_conflict=mrn", {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+      body: JSON.stringify([toDbPatient(patient)])
+    });
+    return fromDbPatient(rows[0]);
+  }
+
+  async function insertInventory(item) {
+    const rows = await request("/inventory", {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify([toDbInventory(item)])
+    });
+    return fromDbInventory(rows[0]);
+  }
+
+  async function updateInventory(item) {
+    const rows = await request(`/inventory?id=eq.${encodeURIComponent(item.id)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(toDbInventory(item))
+    });
+    return fromDbInventory(rows[0]);
+  }
+
+  async function insertPrescription(prescription) {
+    const rows = await request("/prescriptions", {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify([toDbPrescription(prescription)])
+    });
+    return fromDbPrescription(rows[0], new Map(state.patients.map((patient) => [patient.id, patient])));
+  }
+
+  async function replaceWithDemo(demoState) {
+    await request("/prescriptions?id=not.is.null", { method: "DELETE" });
+    await request("/inventory?id=not.is.null", { method: "DELETE" });
+    await request("/patients?id=not.is.null", { method: "DELETE" });
+
+    const patientRows = await request("/patients", {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(demoState.patients.map(toDbPatient))
+    });
+    const inventoryRows = await request("/inventory", {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(demoState.inventory.map(toDbInventory))
+    });
+    const prescriptionRows = await request("/prescriptions", {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(demoState.prescriptions.map(toDbPrescription))
+    });
+
+    const patients = patientRows.map(fromDbPatient);
+    const patientsById = new Map(patients.map((patient) => [patient.id, patient]));
+
+    return {
+      patients,
+      inventory: inventoryRows.map(fromDbInventory),
+      prescriptions: prescriptionRows.map((entry) => fromDbPrescription(entry, patientsById))
+    };
+  }
+
+  return {
+    loadState,
+    upsertPatient,
+    insertInventory,
+    updateInventory,
+    insertPrescription,
+    replaceWithDemo
+  };
+}
+
+async function handleLogin(event) {
+  event.preventDefault();
+
+  const role = elements.roleSelect.value;
+  const username = elements.username.value.trim();
+  const password = elements.password.value.trim();
+  const candidate = DEMO_USERS[role];
+
+  if (candidate.username === username && candidate.password === password) {
+    currentUser = { ...candidate, role };
+    elements.prescriber.value = currentUser.name;
+    setMessage(elements.loginMessage, `Logged in as ${role}.`, "success");
+
+    if (databaseReady) {
+      await refreshFromDatabase();
+    }
+
+    render();
+    return;
+  }
+
+  setMessage(elements.loginMessage, "Invalid login for the selected role.", "error");
+}
+
+async function handleInventorySave(event) {
+  event.preventDefault();
+
+  if (!currentUser || currentUser.role !== "pharmacist") {
+    alert("Only pharmacists can update inventory.");
+    return;
+  }
+
+  const formData = new FormData(event.currentTarget);
+  let item = {
+    id: createId(),
+    name: readString(formData, "drug-name"),
+    category: readString(formData, "drug-category"),
+    stock: readNumber(formData, "drug-stock"),
+    threshold: readNumber(formData, "drug-threshold")
+  };
+
+  elements.inventorySubmit.disabled = true;
+
+  try {
+    if (databaseReady) {
+      item = await database.insertInventory(item);
+    }
+
+    state.inventory.unshift(item);
+    persistLocalState();
+    event.currentTarget.reset();
+    render();
+  } catch (error) {
+    console.error(error);
+    alert("Could not save medicine to Supabase. Please check your database connection and RLS policies.");
+  } finally {
+    elements.inventorySubmit.disabled = false;
+  }
+}
+
+async function handlePrescriptionSave(event) {
+  event.preventDefault();
+
+  const formData = new FormData(event.currentTarget);
+  const date = readString(formData, "prescription-date") || todayISO();
+  const mrn = normalizeMrn(readString(formData, "patient-mrn"));
+  const patientName = readString(formData, "patient-name");
+
+  if (!mrn || !patientName) {
+    setMessage(elements.patientLookupMessage, "MRN and patient name are required.", "error");
+    return;
+  }
+
+  elements.prescriptionSubmit.disabled = true;
+
+  try {
+    let patient = buildPatientRecord({ mrn, name: patientName, visitDate: date });
+
+    if (databaseReady) {
+      patient = await database.upsertPatient(patient);
+    }
+
+    upsertPatientInState(patient);
+
+    let prescription = {
+      id: createId(),
+      date,
+      patientId: patient.id,
+      patientMrn: patient.mrn,
+      patientName: patient.name,
+      drugName: readString(formData, "prescribed-drug"),
+      frequency: readString(formData, "frequency"),
+      duration: readString(formData, "duration"),
+      prescriber: readString(formData, "prescriber")
+    };
+
+    if (databaseReady) {
+      prescription = await database.insertPrescription(prescription);
+    }
+
+    state.prescriptions.unshift(prescription);
+    await dispenseInventoryItem(prescription.drugName);
+
+    persistLocalState();
+    event.currentTarget.reset();
+    elements.prescriptionDate.value = todayISO();
+    elements.prescriber.value = currentUser?.name || "";
+    setMessage(elements.patientLookupMessage, `Treatment saved for ${patient.name} (${patient.mrn}).`, "success");
+    render();
+  } catch (error) {
+    console.error(error);
+    setMessage(elements.patientLookupMessage, "Could not save treatment to Supabase. Check connection and policies.", "error");
+  } finally {
+    elements.prescriptionSubmit.disabled = false;
+  }
+}
+
+function handleMrnLookup() {
+  const mrn = normalizeMrn(elements.patientMrn.value);
+
+  if (!mrn) {
+    setMessage(elements.patientLookupMessage, "", "");
+    return;
+  }
+
+  const patient = findPatientByMrn(mrn);
+  if (!patient) {
+    setMessage(elements.patientLookupMessage, "New MRN: saving this treatment will create a patient record.", "info");
+    return;
+  }
+
+  elements.patientName.value = patient.name;
+  setMessage(elements.patientLookupMessage, `Found ${patient.name}. New treatment will be added to this record.`, "success");
+}
+
+function logout() {
+  currentUser = null;
+  patientFilter = "";
+  elements.loginForm.reset();
+  elements.prescriptionForm.reset();
+  elements.roleSelect.value = "pharmacist";
+  elements.patientSearch.value = "";
+  elements.prescriptionDate.value = todayISO();
+  setMessage(elements.loginMessage, "", "");
+  setMessage(elements.patientLookupMessage, "", "");
+  render();
+}
+
+async function resetDemoData() {
+  if (!confirm("Reset medicines, patients, and treatment history to sample data?")) {
+    return;
+  }
+
+  const demoState = defaultState();
+  elements.seedReset.disabled = true;
+
+  try {
+    state = databaseReady ? await database.replaceWithDemo(demoState) : demoState;
+    persistLocalState();
+    patientFilter = "";
+    elements.patientSearch.value = "";
+    render();
+  } catch (error) {
+    console.error(error);
+    alert("Could not reset Supabase data. Please check your table policies.");
+  } finally {
+    elements.seedReset.disabled = false;
+  }
+}
+
+function render() {
+  elements.app.classList.toggle("hidden", !currentUser);
+
+  if (!currentUser) {
+    return;
+  }
+
+  elements.roleBadge.textContent = currentUser.role;
+  elements.welcomeTitle.textContent = `${currentUser.name}'s dashboard`;
+
+  toggleRolePermissions();
+  renderStats();
+  renderInventory();
+  renderPatients();
+  renderPrescriptions();
+}
+
+function toggleRolePermissions() {
+  const pharmacist = currentUser.role === "pharmacist";
+
+  disableForm(elements.inventoryForm, !pharmacist);
+  elements.inventorySubmit.textContent = pharmacist ? "Save Medicine" : "Pharmacist Access Only";
+
+  elements.prescriptionSubmit.textContent = pharmacist
+    ? "Dispense / Record Treatment"
+    : "Issue Treatment";
+}
+
+function disableForm(form, disabled) {
+  [...form.elements].forEach((element) => {
+    if (element.tagName === "BUTTON") {
+      element.disabled = false;
+      return;
+    }
+    element.disabled = disabled;
+  });
+}
+
+function renderStats() {
+  const lowStockCount = state.inventory.filter((item) => item.stock <= item.threshold).length;
+  const today = todayISO();
+  const todayPrescriptions = state.prescriptions.filter((item) => item.date === today).length;
+
+  elements.totalMedicines.textContent = String(state.inventory.length);
+  elements.lowStockCount.textContent = String(lowStockCount);
+  elements.todayPrescriptions.textContent = String(todayPrescriptions);
+  elements.totalPrescriptions.textContent = String(state.prescriptions.length);
+  elements.totalPatients.textContent = String(state.patients.length);
+}
+
+function renderInventory() {
+  elements.inventoryTable.innerHTML = state.inventory
+    .map((item) => {
+      const status = getStockStatus(item);
+      const action = currentUser.role === "pharmacist"
+        ? `
+          <div class="table-action">
+            <button type="button" data-action="inc" data-id="${item.id}" aria-label="Increase ${escapeHtml(item.name)} stock">+1</button>
+            <button type="button" data-action="dec" data-id="${item.id}" aria-label="Decrease ${escapeHtml(item.name)} stock">-1</button>
+          </div>
+        `
+        : `<span class="muted-note">View only</span>`;
+
+      return `
+        <tr>
+          <td data-label="Drug">${escapeHtml(item.name)}</td>
+          <td data-label="Category">${escapeHtml(item.category)}</td>
+          <td data-label="Stock">${item.stock}</td>
+          <td data-label="Status"><span class="pill ${status.tone}">${status.label}</span></td>
+          <td data-label="Update">${action}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  elements.inventoryTable.querySelectorAll("button[data-action]").forEach((button) => {
+    button.addEventListener("click", () => adjustStock(button.dataset.id, button.dataset.action));
+  });
+}
+
+function renderPatients() {
+  const patients = getFilteredPatients();
+
+  elements.patientTable.innerHTML = patients.length
+    ? patients.map((patient) => {
+      const treatmentCount = state.prescriptions.filter((entry) => entry.patientId === patient.id).length;
+
+      return `
+        <tr>
+          <td data-label="MRN">${escapeHtml(patient.mrn)}</td>
+          <td data-label="Patient">${escapeHtml(patient.name)}</td>
+          <td data-label="Last visit">${formatDate(patient.lastVisit)}</td>
+          <td data-label="Treatments">${treatmentCount}</td>
+          <td data-label="Action">
+            <button type="button" class="mini-btn" data-patient-id="${patient.id}">Use</button>
+          </td>
+        </tr>
+      `;
+    }).join("")
+    : `<tr><td colspan="5" class="empty-state">No patients match this search.</td></tr>`;
+
+  elements.patientTable.querySelectorAll("button[data-patient-id]").forEach((button) => {
+    button.addEventListener("click", () => fillPatientFromRecord(button.dataset.patientId));
+  });
+}
+
+function renderPrescriptions() {
+  const patientIds = new Set(getFilteredPatients().map((patient) => patient.id));
+  const shouldFilter = Boolean(patientFilter);
+
+  const prescriptions = state.prescriptions
+    .slice()
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .filter((entry) => !shouldFilter || patientIds.has(entry.patientId) || matchesSearch(entry.patientMrn, patientFilter));
+
+  elements.prescriptionTable.innerHTML = prescriptions.length
+    ? prescriptions.map((entry) => `
+      <tr>
+        <td data-label="Date">${formatDate(entry.date)}</td>
+        <td data-label="MRN">${escapeHtml(entry.patientMrn || "Unassigned")}</td>
+        <td data-label="Patient">${escapeHtml(entry.patientName)}</td>
+        <td data-label="Treatment">${escapeHtml(entry.drugName)}</td>
+        <td data-label="Frequency">${escapeHtml(entry.frequency)}</td>
+        <td data-label="Prescriber">${escapeHtml(entry.prescriber)}</td>
+      </tr>
+    `).join("")
+    : `<tr><td colspan="6" class="empty-state">No treatment history found.</td></tr>`;
+}
+
+async function adjustStock(id, action) {
+  if (currentUser.role !== "pharmacist") {
+    return;
+  }
+
+  const item = state.inventory.find((entry) => entry.id === id);
+  if (!item) {
+    return;
+  }
+
+  const delta = action === "inc" ? 1 : -1;
+  const updated = { ...item, stock: Math.max(0, item.stock + delta) };
+
+  try {
+    const savedItem = databaseReady ? await database.updateInventory(updated) : updated;
+    state.inventory = state.inventory.map((entry) => entry.id === id ? savedItem : entry);
+    persistLocalState();
+    render();
+  } catch (error) {
+    console.error(error);
+    alert("Could not update stock in Supabase.");
+  }
+}
+
+function fillPatientFromRecord(patientId) {
+  const patient = state.patients.find((entry) => entry.id === patientId);
+  if (!patient) {
+    return;
+  }
+
+  elements.patientMrn.value = patient.mrn;
+  elements.patientName.value = patient.name;
+  elements.prescribedDrug.focus();
+  setMessage(elements.patientLookupMessage, `Ready to add a new treatment for ${patient.name}.`, "success");
+}
+
+function buildPatientRecord({ mrn, name, visitDate }) {
+  const existing = findPatientByMrn(mrn);
+
+  if (existing) {
+    return {
+      ...existing,
+      name,
+      lastVisit: newestDate(existing.lastVisit, visitDate)
+    };
+  }
+
+  return {
+    id: createId(),
+    mrn,
+    name,
+    createdAt: todayISO(),
+    lastVisit: visitDate
+  };
+}
+
+function upsertPatientInState(patient) {
+  const index = state.patients.findIndex((entry) => entry.id === patient.id || entry.mrn.toLowerCase() === patient.mrn.toLowerCase());
+
+  if (index === -1) {
+    state.patients.unshift(patient);
+    return;
+  }
+
+  state.patients[index] = patient;
+}
+
+async function dispenseInventoryItem(drugName) {
+  const inventoryItem = state.inventory.find((item) =>
+    item.name.toLowerCase() === drugName.toLowerCase()
+  );
+
+  if (!inventoryItem || currentUser?.role !== "pharmacist") {
+    return;
+  }
+
+  const updated = { ...inventoryItem, stock: Math.max(0, inventoryItem.stock - 1) };
+  const savedItem = databaseReady ? await database.updateInventory(updated) : updated;
+  state.inventory = state.inventory.map((item) => item.id === savedItem.id ? savedItem : item);
+}
+
+function getFilteredPatients() {
+  return state.patients
+    .slice()
+    .sort((a, b) => b.lastVisit.localeCompare(a.lastVisit) || a.name.localeCompare(b.name))
+    .filter((patient) => !patientFilter
+      || matchesSearch(patient.mrn, patientFilter)
+      || matchesSearch(patient.name, patientFilter));
+}
+
+function findPatientByMrn(mrn) {
+  return state.patients.find((patient) => patient.mrn.toLowerCase() === mrn.toLowerCase());
+}
+
+function getStockStatus(item) {
+  if (item.stock === 0) {
+    return { label: "Out of stock", tone: "danger" };
+  }
+  if (item.stock <= item.threshold) {
+    return { label: "Low stock", tone: "warn" };
+  }
+  return { label: "Healthy", tone: "good" };
+}
+
+async function refreshFromDatabase() {
+  if (!databaseReady) {
+    return;
+  }
+
+  try {
+    state = await database.loadState();
+    persistLocalState();
+    render();
+  } catch (error) {
+    console.error(error);
+    setDatabaseStatus("Supabase unavailable", "error");
+  }
+}
+
+function loadLocalState() {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (!saved) {
+    return defaultState();
+  }
+
+  try {
+    return migrateState(JSON.parse(saved));
+  } catch (error) {
+    return defaultState();
+  }
+}
+
+function migrateState(saved) {
+  const base = defaultState();
+  const migrated = {
+    patients: Array.isArray(saved.patients) ? saved.patients : [],
+    inventory: Array.isArray(saved.inventory) ? saved.inventory : base.inventory,
+    prescriptions: Array.isArray(saved.prescriptions) ? saved.prescriptions : []
+  };
+
+  migrated.patients = migrated.patients.map((patient, index) => ({
+    id: patient.id || createId(),
+    mrn: normalizeMrn(patient.mrn || makeLegacyMrn(patient.name || "Patient", index)),
+    name: patient.name || "Unknown Patient",
+    createdAt: patient.createdAt || todayISO(),
+    lastVisit: patient.lastVisit || patient.createdAt || todayISO()
+  }));
+
+  migrated.prescriptions = migrated.prescriptions.map((entry, index) => {
+    const patientName = entry.patientName || "Unknown Patient";
+    const mrn = normalizeMrn(entry.patientMrn || entry.mrn || makeLegacyMrn(patientName, index));
+    let patient = migrated.patients.find((item) => item.mrn.toLowerCase() === mrn.toLowerCase());
+
+    if (!patient) {
+      patient = {
+        id: entry.patientId || createId(),
+        mrn,
+        name: patientName,
+        createdAt: entry.date || todayISO(),
+        lastVisit: entry.date || todayISO()
+      };
+      migrated.patients.push(patient);
+    }
+
+    patient.lastVisit = newestDate(patient.lastVisit, entry.date || todayISO());
+
+    return {
+      ...entry,
+      id: entry.id || createId(),
+      date: entry.date || todayISO(),
+      patientId: patient.id,
+      patientMrn: patient.mrn,
+      patientName: patient.name,
+      drugName: entry.drugName || entry.treatment || "",
+      frequency: entry.frequency || "",
+      duration: entry.duration || "",
+      prescriber: entry.prescriber || ""
+    };
+  });
+
+  return migrated;
+}
+
+function persistLocalState() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function setDatabaseStatus(text, type) {
+  if (!elements.dbStatus) {
+    return;
+  }
+
+  const suffix = usingFallbackStorage && type !== "success" ? " - browser storage" : "";
+  elements.dbStatus.textContent = `${text}${suffix}`;
+  elements.dbStatus.className = `db-status ${type}`;
+}
+
+function fromDbPatient(row) {
+  return {
+    id: row.id,
+    mrn: row.mrn,
+    name: row.name,
+    createdAt: row.created_at,
+    lastVisit: row.last_visit
+  };
+}
+
+function toDbPatient(patient) {
+  return {
+    id: patient.id,
+    mrn: patient.mrn,
+    name: patient.name,
+    created_at: patient.createdAt || todayISO(),
+    last_visit: patient.lastVisit || todayISO()
+  };
+}
+
+function fromDbInventory(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    category: row.category,
+    stock: Number(row.stock || 0),
+    threshold: Number(row.threshold || 0)
+  };
+}
+
+function toDbInventory(item) {
+  return {
+    id: item.id,
+    name: item.name,
+    category: item.category,
+    stock: item.stock,
+    threshold: item.threshold
+  };
+}
+
+function fromDbPrescription(row, patientsById) {
+  const patient = patientsById.get(row.patient_id);
+
+  return {
+    id: row.id,
+    date: row.date,
+    patientId: row.patient_id,
+    patientMrn: patient?.mrn || "",
+    patientName: patient?.name || "Unknown Patient",
+    drugName: row.drug_name,
+    frequency: row.frequency,
+    duration: row.duration,
+    prescriber: row.prescriber
+  };
+}
+
+function toDbPrescription(prescription) {
+  return {
+    id: prescription.id,
+    date: prescription.date,
+    patient_id: prescription.patientId,
+    drug_name: prescription.drugName,
+    frequency: prescription.frequency,
+    duration: prescription.duration,
+    prescriber: prescription.prescriber
+  };
+}
+
+function createId() {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+  return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function todayISO() {
+  return new Date().toISOString().split("T")[0];
+}
+
+function newestDate(first, second) {
+  return first && first.localeCompare(second) > 0 ? first : second;
+}
+
+function makeLegacyMrn(name, index) {
+  const initials = String(name)
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 3)
+    .toUpperCase() || "PT";
+
+  return `LEG-${initials}-${String(index + 1).padStart(4, "0")}`;
+}
+
+function normalizeMrn(value) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, "-");
+}
+
+function setMessage(element, text, type) {
+  element.textContent = text;
+  element.className = type ? `message ${type}` : "message";
+}
+
+function readString(formData, key) {
+  return String(formData.get(key) || "").trim();
+}
+
+function readNumber(formData, key) {
+  return Number(formData.get(key) || 0);
+}
+
+function formatDate(value) {
+  if (!value) {
+    return "Not recorded";
+  }
+
+  const date = new Date(`${value}T00:00:00`);
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  });
+}
+
+function matchesSearch(value, query) {
+  return String(value || "").toLowerCase().includes(String(query || "").toLowerCase());
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
