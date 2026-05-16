@@ -1,9 +1,5 @@
 const STORAGE_KEY = "pharmacy-dashboard-state-v1";
-
-const DEMO_USERS = {
-  pharmacist: { username: "pharmacist", password: "med123", name: "Lina Hassan" },
-  physician: { username: "physician", password: "care123", name: "Dr. Omar Kareem" }
-};
+const AUTH_STORAGE_KEY = "pharmacy-dashboard-auth-v1";
 
 const defaultState = () => {
   const saraId = createId();
@@ -52,7 +48,6 @@ let currentUser = null;
 let patientFilter = "";
 let database = null;
 let databaseReady = false;
-let usingFallbackStorage = true;
 
 const elements = {
   app: document.getElementById("app"),
@@ -62,7 +57,6 @@ const elements = {
   loginMessage: document.getElementById("login-message"),
   patientLookupMessage: document.getElementById("patient-lookup-message"),
   dbStatus: document.getElementById("db-status"),
-  roleSelect: document.getElementById("role"),
   username: document.getElementById("username"),
   password: document.getElementById("password"),
   roleBadge: document.getElementById("role-badge"),
@@ -105,29 +99,38 @@ render();
 initializeDatabase();
 
 async function initializeDatabase() {
-  setDatabaseStatus("Local fallback", "info");
+  setDatabaseStatus("Loading Supabase", "info");
 
   const config = await loadSupabaseConfig();
   if (!config) {
-    setDatabaseStatus("Local fallback", "warn");
+    setDatabaseStatus("Supabase config missing", "error");
+    setMessage(elements.loginMessage, "Add SUPABASE_URL and SUPABASE_ANON_KEY in Vercel, then redeploy.", "error");
     return;
   }
 
   database = createSupabaseStore(config);
 
   try {
+    const restored = await database.restoreSession();
+    if (!restored) {
+      setDatabaseStatus("Ready for sign in", "info");
+      return;
+    }
+
+    currentUser = await database.loadCurrentUser();
+    elements.prescriber.value = currentUser.name;
     state = await database.loadState();
     databaseReady = true;
-    usingFallbackStorage = false;
     persistLocalState();
     setDatabaseStatus("Supabase connected", "success");
     render();
   } catch (error) {
     console.error(error);
-    database = null;
+    database.clearSession();
+    currentUser = null;
     databaseReady = false;
-    usingFallbackStorage = true;
-    setDatabaseStatus("Supabase unavailable", "error");
+    setDatabaseStatus("Sign in required", "warn");
+    setMessage(elements.loginMessage, "Please sign in again.", "error");
   }
 }
 
@@ -161,20 +164,104 @@ function normalizeConfig(config) {
 
 function createSupabaseStore(config) {
   const restUrl = `${config.supabaseUrl}/rest/v1`;
-  const baseHeaders = {
-    apikey: config.supabaseAnonKey,
-    Authorization: `Bearer ${config.supabaseAnonKey}`,
-    "Content-Type": "application/json"
-  };
+  const authUrl = `${config.supabaseUrl}/auth/v1`;
+  let session = null;
 
-  async function request(path, options = {}) {
-    const response = await fetch(`${restUrl}${path}`, {
+  function getAuthToken() {
+    return session?.access_token || "";
+  }
+
+  function getBaseHeaders() {
+    return {
+      apikey: config.supabaseAnonKey,
+      Authorization: `Bearer ${getAuthToken() || config.supabaseAnonKey}`,
+      "Content-Type": "application/json"
+    };
+  }
+
+  function setSession(nextSession) {
+    session = nextSession;
+    if (!session?.access_token) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      return;
+    }
+
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+  }
+
+  function clearSession() {
+    session = null;
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+  }
+
+  async function authRequest(path, options = {}) {
+    const response = await fetch(`${authUrl}${path}`, {
       ...options,
       headers: {
-        ...baseHeaders,
+        apikey: config.supabaseAnonKey,
+        "Content-Type": "application/json",
+        ...(getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : {}),
         ...(options.headers || {})
       }
     });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`Supabase auth failed: ${response.status} ${detail}`);
+    }
+
+    if (response.status === 204) {
+      return null;
+    }
+
+    return response.json();
+  }
+
+  async function refreshSession() {
+    if (!session?.refresh_token) {
+      return false;
+    }
+
+    const refreshed = await authRequest("/token?grant_type=refresh_token", {
+      method: "POST",
+      body: JSON.stringify({ refresh_token: session.refresh_token })
+    });
+
+    setSession(refreshed);
+    return true;
+  }
+
+  async function restoreSession() {
+    const saved = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!saved) {
+      return false;
+    }
+
+    try {
+      setSession(JSON.parse(saved));
+      const expiresAt = Number(session?.expires_at || 0);
+      if (expiresAt && expiresAt < Math.floor(Date.now() / 1000) + 60) {
+        return refreshSession();
+      }
+      return Boolean(session?.access_token);
+    } catch (error) {
+      clearSession();
+      return false;
+    }
+  }
+
+  async function request(path, options = {}, retry = true) {
+    const response = await fetch(`${restUrl}${path}`, {
+      ...options,
+      headers: {
+        ...getBaseHeaders(),
+        ...(options.headers || {})
+      }
+    });
+
+    if (response.status === 401 && retry && await refreshSession()) {
+      return request(path, options, false);
+    }
 
     if (!response.ok) {
       const detail = await response.text();
@@ -186,6 +273,41 @@ function createSupabaseStore(config) {
     }
 
     return response.json();
+  }
+
+  async function signIn(email, password) {
+    const nextSession = await authRequest("/token?grant_type=password", {
+      method: "POST",
+      body: JSON.stringify({ email, password })
+    });
+
+    setSession(nextSession);
+    return loadCurrentUser();
+  }
+
+  async function signOut() {
+    if (getAuthToken()) {
+      try {
+        await authRequest("/logout", { method: "POST" });
+      } catch (error) {
+        console.warn("Supabase sign out failed; clearing local session.", error);
+      }
+    }
+    clearSession();
+  }
+
+  async function loadCurrentUser() {
+    const userId = session?.user?.id;
+    if (!userId) {
+      throw new Error("Missing Supabase user session.");
+    }
+
+    const rows = await request(`/profiles?select=*&user_id=eq.${encodeURIComponent(userId)}&limit=1`);
+    if (!rows.length) {
+      throw new Error("This account does not have a pharmacist or physician profile.");
+    }
+
+    return fromDbProfile(rows[0], session.user);
   }
 
   async function loadState() {
@@ -274,6 +396,11 @@ function createSupabaseStore(config) {
   }
 
   return {
+    clearSession,
+    restoreSession,
+    signIn,
+    signOut,
+    loadCurrentUser,
     loadState,
     upsertPatient,
     insertInventory,
@@ -286,25 +413,36 @@ function createSupabaseStore(config) {
 async function handleLogin(event) {
   event.preventDefault();
 
-  const role = elements.roleSelect.value;
-  const username = elements.username.value.trim();
-  const password = elements.password.value.trim();
-  const candidate = DEMO_USERS[role];
-
-  if (candidate.username === username && candidate.password === password) {
-    currentUser = { ...candidate, role };
-    elements.prescriber.value = currentUser.name;
-    setMessage(elements.loginMessage, `Logged in as ${role}.`, "success");
-
-    if (databaseReady) {
-      await refreshFromDatabase();
-    }
-
-    render();
+  if (!database) {
+    setMessage(elements.loginMessage, "Supabase is not configured yet.", "error");
     return;
   }
 
-  setMessage(elements.loginMessage, "Invalid login for the selected role.", "error");
+  const email = elements.username.value.trim();
+  const password = elements.password.value.trim();
+  const submitButton = elements.loginForm.querySelector("button[type='submit']");
+  submitButton.disabled = true;
+  setMessage(elements.loginMessage, "Signing in...", "info");
+
+  try {
+    currentUser = await database.signIn(email, password);
+    elements.prescriber.value = currentUser.name;
+    databaseReady = true;
+    setDatabaseStatus("Supabase connected", "success");
+    setMessage(elements.loginMessage, `Logged in as ${currentUser.role}.`, "success");
+    state = await database.loadState();
+    persistLocalState();
+    render();
+  } catch (error) {
+    console.error(error);
+    database.clearSession();
+    currentUser = null;
+    databaseReady = false;
+    setDatabaseStatus("Sign in failed", "error");
+    setMessage(elements.loginMessage, "Invalid email/password or missing role profile.", "error");
+  } finally {
+    submitButton.disabled = false;
+  }
 }
 
 async function handleInventorySave(event) {
@@ -418,20 +556,30 @@ function handleMrnLookup() {
   setMessage(elements.patientLookupMessage, `Found ${patient.name}. New treatment will be added to this record.`, "success");
 }
 
-function logout() {
+async function logout() {
+  if (database) {
+    await database.signOut();
+  }
+
   currentUser = null;
   patientFilter = "";
+  databaseReady = false;
   elements.loginForm.reset();
   elements.prescriptionForm.reset();
-  elements.roleSelect.value = "pharmacist";
   elements.patientSearch.value = "";
   elements.prescriptionDate.value = todayISO();
   setMessage(elements.loginMessage, "", "");
   setMessage(elements.patientLookupMessage, "", "");
+  setDatabaseStatus(database ? "Ready for sign in" : "Supabase config missing", database ? "info" : "error");
   render();
 }
 
 async function resetDemoData() {
+  if (currentUser?.role !== "pharmacist") {
+    alert("Only pharmacists can reset dashboard data.");
+    return;
+  }
+
   if (!confirm("Reset medicines, patients, and treatment history to sample data?")) {
     return;
   }
@@ -440,7 +588,7 @@ async function resetDemoData() {
   elements.seedReset.disabled = true;
 
   try {
-    state = databaseReady ? await database.replaceWithDemo(demoState) : demoState;
+    state = await database.replaceWithDemo(demoState);
     persistLocalState();
     patientFilter = "";
     elements.patientSearch.value = "";
@@ -475,6 +623,8 @@ function toggleRolePermissions() {
 
   disableForm(elements.inventoryForm, !pharmacist);
   elements.inventorySubmit.textContent = pharmacist ? "Save Medicine" : "Pharmacist Access Only";
+  elements.seedReset.disabled = !pharmacist;
+  elements.seedReset.title = pharmacist ? "" : "Only pharmacists can reset dashboard data.";
 
   elements.prescriptionSubmit.textContent = pharmacist
     ? "Dispense / Record Treatment"
@@ -774,9 +924,18 @@ function setDatabaseStatus(text, type) {
     return;
   }
 
-  const suffix = usingFallbackStorage && type !== "success" ? " - browser storage" : "";
-  elements.dbStatus.textContent = `${text}${suffix}`;
+  elements.dbStatus.textContent = text;
   elements.dbStatus.className = `db-status ${type}`;
+}
+
+function fromDbProfile(row, authUser) {
+  return {
+    id: row.user_id,
+    email: row.email || authUser?.email || "",
+    username: row.username || "",
+    name: row.full_name || authUser?.email || "Clinical user",
+    role: row.role
+  };
 }
 
 function fromDbPatient(row) {
