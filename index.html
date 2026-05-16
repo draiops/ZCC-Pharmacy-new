@@ -23,21 +23,13 @@
       <div class="login-card">
         <div class="card-header">
           <h2>Sign In</h2>
-          <p>Use one of the demo accounts to explore the dashboard.</p>
+          <p>Use your Supabase account for pharmacist or physician access.</p>
         </div>
 
         <form id="login-form" class="stack">
           <label class="field">
-            <span>Role</span>
-            <select id="role" name="role" required>
-              <option value="pharmacist">Pharmacist</option>
-              <option value="physician">Physician</option>
-            </select>
-          </label>
-
-          <label class="field">
-            <span>Username</span>
-            <input id="username" name="username" type="text" placeholder="Enter username" autocomplete="username" required>
+            <span>Email</span>
+            <input id="username" name="email" type="email" placeholder="name@clinic.com" autocomplete="email" required>
           </label>
 
           <label class="field">
@@ -49,8 +41,7 @@
         </form>
 
         <div class="demo-logins">
-          <p><strong>Pharmacist:</strong> pharmacist / med123</p>
-          <p><strong>Physician:</strong> physician / care123</p>
+          <p><strong>New users:</strong> add them in Supabase Authentication, then set their role in profiles.</p>
         </div>
         <p id="login-message" class="message" aria-live="polite"></p>
       </div>
@@ -63,7 +54,7 @@
           <h2 id="welcome-title"></h2>
         </div>
         <div class="topbar-actions">
-          <span id="db-status" class="db-status info">Local fallback</span>
+          <span id="db-status" class="db-status info">Loading Supabase</span>
           <button id="seed-reset" class="secondary-btn">Reset Sample Data</button>
           <button id="logout" class="ghost-btn">Logout</button>
         </div>
