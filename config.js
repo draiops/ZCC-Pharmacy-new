@@ -1,4 +1,4 @@
-export default function handler(request, response) {
+module.exports = function handler(request, response) {
   // Use Vercel environment variables if set, otherwise fall back to defaults.
   const supabaseUrl =
     process.env.SUPABASE_URL || "https://gwqzyhqsubkxyeiwaytz.supabase.co";
