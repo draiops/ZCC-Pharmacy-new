@@ -455,22 +455,43 @@ async function handleInventorySave(event) {
   }
 
   const formData = new FormData(event.currentTarget);
-  let item = {
-    id: createId(),
-    name: readString(formData, "drug-name"),
-    category: readString(formData, "drug-category"),
-    stock: readNumber(formData, "drug-stock"),
-    threshold: readNumber(formData, "drug-threshold")
-  };
+  const name = readString(formData, "drug-name");
+  const category = readString(formData, "drug-category");
+  const addedStock = readNumber(formData, "drug-stock");
+  const threshold = readNumber(formData, "drug-threshold");
 
   elements.inventorySubmit.disabled = true;
 
   try {
-    if (databaseReady) {
-      item = await database.insertInventory(item);
+    const existingItem = state.inventory.find(i => i.name.toLowerCase() === name.toLowerCase());
+
+    if (existingItem) {
+      // Update existing
+      const updated = {
+        ...existingItem,
+        stock: existingItem.stock + addedStock,
+        threshold: threshold > 0 ? threshold : existingItem.threshold,
+        category: category || existingItem.category
+      };
+      
+      const savedItem = databaseReady ? await database.updateInventory(updated) : updated;
+      state.inventory = state.inventory.map(i => i.id === savedItem.id ? savedItem : i);
+    } else {
+      // Insert new
+      let item = {
+        id: createId(),
+        name,
+        category,
+        stock: addedStock,
+        threshold
+      };
+      
+      if (databaseReady) {
+        item = await database.insertInventory(item);
+      }
+      state.inventory.unshift(item);
     }
 
-    state.inventory.unshift(item);
     persistLocalState();
     event.currentTarget.reset();
     render();
@@ -656,7 +677,18 @@ function renderStats() {
 }
 
 function renderInventory() {
-  elements.inventoryTable.innerHTML = state.inventory
+  const consolidated = new Map();
+  for (const item of state.inventory) {
+    const key = item.name.toLowerCase();
+    if (consolidated.has(key)) {
+      consolidated.get(key).stock += item.stock;
+    } else {
+      consolidated.set(key, { ...item });
+    }
+  }
+  const uniqueInventory = Array.from(consolidated.values()).sort((a, b) => a.name.localeCompare(b.name));
+
+  elements.inventoryTable.innerHTML = uniqueInventory
     .map((item) => {
       const status = getStockStatus(item);
       const action = currentUser.role === "pharmacist"
@@ -687,18 +719,38 @@ function renderInventory() {
 
 function renderDrugDropdown() {
   const currentValue = elements.prescribedDrug.value;
-  const options = state.inventory
-    .slice()
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map((item) => {
+  
+  const consolidated = new Map();
+  for (const item of state.inventory) {
+    const key = item.name.toLowerCase();
+    if (consolidated.has(key)) {
+      consolidated.get(key).stock += item.stock;
+    } else {
+      consolidated.set(key, { ...item });
+    }
+  }
+  const uniqueInventory = Array.from(consolidated.values());
+  
+  const byCategory = {};
+  for (const item of uniqueInventory) {
+    const cat = item.category || "Other";
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(item);
+  }
+  
+  const sortedCategories = Object.keys(byCategory).sort();
+  const options = sortedCategories.map(cat => {
+    const items = byCategory[cat].sort((a, b) => a.name.localeCompare(b.name));
+    const optGroup = items.map(item => {
       const stockInfo = item.stock > 0 ? `${item.stock} in stock` : "Out of stock";
       return `<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)} (${stockInfo})</option>`;
-    })
-    .join("");
+    }).join("");
+    return `<optgroup label="${escapeHtml(cat)}">\n${optGroup}\n</optgroup>`;
+  }).join("\n");
     
   elements.prescribedDrug.innerHTML = `<option value="">Select a medicine...</option>\n${options}`;
   
-  if (currentValue && state.inventory.some(item => item.name === currentValue)) {
+  if (currentValue && uniqueInventory.some(item => item.name === currentValue)) {
     elements.prescribedDrug.value = currentValue;
   }
 }
