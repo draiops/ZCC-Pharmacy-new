@@ -536,6 +536,8 @@ async function handlePrescriptionSave(event) {
       drugName: readString(formData, "prescribed-drug"),
       frequency: readString(formData, "frequency"),
       duration: readString(formData, "duration"),
+      complaint: formData.getAll("complaint").map(s => String(s).trim()).filter(Boolean).join(", "),
+      notes: readString(formData, "notes"),
       prescriber: readString(formData, "prescriber")
     };
 
@@ -798,10 +800,12 @@ function renderPrescriptions() {
         <td data-label="Patient">${escapeHtml(entry.patientName)}</td>
         <td data-label="Treatment">${escapeHtml(entry.drugName)}</td>
         <td data-label="Frequency">${escapeHtml(entry.frequency)}</td>
+        <td data-label="Complaint">${escapeHtml(entry.complaint || "-")}</td>
+        <td data-label="Notes">${escapeHtml(entry.notes || "-")}</td>
         <td data-label="Prescriber">${escapeHtml(entry.prescriber)}</td>
       </tr>
     `).join("")
-    : `<tr><td colspan="6" class="empty-state">No treatment history found.</td></tr>`;
+    : `<tr><td colspan="8" class="empty-state">No treatment history found.</td></tr>`;
 }
 
 async function adjustStock(id, action) {
@@ -1062,6 +1066,8 @@ function fromDbPrescription(row, patientsById) {
     drugName: row.drug_name,
     frequency: row.frequency,
     duration: row.duration,
+    complaint: row.complaint || "",
+    notes: row.notes || "",
     prescriber: row.prescriber
   };
 }
@@ -1074,6 +1080,8 @@ function toDbPrescription(prescription) {
     drug_name: prescription.drugName,
     frequency: prescription.frequency,
     duration: prescription.duration,
+    complaint: prescription.complaint,
+    notes: prescription.notes,
     prescriber: prescription.prescriber
   };
 }

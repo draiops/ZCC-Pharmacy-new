@@ -136,6 +136,24 @@
               </label>
             </div>
 
+            <label class="field">
+              <span>Patient Symptoms (Hold Ctrl/Cmd to select multiple)</span>
+              <select id="complaint" name="complaint" multiple style="height: auto; min-height: 110px; padding: 6px;">
+                <option value="Radiation Dermatitis">Radiation Dermatitis</option>
+                <option value="Nausea & Vomiting">Nausea & Vomiting</option>
+                <option value="Pain / Mucositis">Pain / Mucositis</option>
+                <option value="Diarrhea">Diarrhea</option>
+                <option value="Fatigue">Fatigue</option>
+                <option value="Cerebral Edema">Cerebral Edema</option>
+                <option value="Other">Other</option>
+              </select>
+            </label>
+
+            <label class="field" style="margin-bottom: 8px;">
+              <span>Clinical Notes</span>
+              <textarea id="notes" name="notes" placeholder="Additional details..." rows="2" style="width: 100%; min-height: 44px; border: 1px solid #cfd8d5; border-radius: 8px; padding: 10px 12px; font-family: inherit; resize: vertical;"></textarea>
+            </label>
+
             <p id="patient-lookup-message" class="message" aria-live="polite"></p>
 
             <button type="submit" id="prescription-submit" class="primary-btn">
@@ -243,6 +261,8 @@
                   <th>Patient</th>
                   <th>Treatment</th>
                   <th>Frequency</th>
+                  <th>Complaint</th>
+                  <th>Notes</th>
                   <th>Prescriber</th>
                 </tr>
               </thead>
@@ -250,6 +270,51 @@
             </table>
           </div>
         </section>
+      </section>
+
+      <section class="panel reference-panel" style="margin-top: 16px;">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Reference Guide</p>
+            <h3>Common Radiotherapy Signs & Symptoms</h3>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Symptom / Sign</th>
+                <th>Recommended Treatment / Drugs</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td data-label="Symptom">Radiation Dermatitis (Skin changes)</td>
+                <td data-label="Drugs">Topical Corticosteroids (e.g., Mometasone), Aloe Vera, Hydrogel</td>
+              </tr>
+              <tr>
+                <td data-label="Symptom">Nausea & Vomiting</td>
+                <td data-label="Drugs">Ondansetron, Granisetron, Metoclopramide, Dexamethasone</td>
+              </tr>
+              <tr>
+                <td data-label="Symptom">Pain / Mucositis (Oral/GI)</td>
+                <td data-label="Drugs">Benzydamine mouthwash, Paracetamol, Ibuprofen, Oral morphine</td>
+              </tr>
+              <tr>
+                <td data-label="Symptom">Diarrhea (Pelvic RT)</td>
+                <td data-label="Drugs">Loperamide, Octreotide (severe cases)</td>
+              </tr>
+              <tr>
+                <td data-label="Symptom">Fatigue</td>
+                <td data-label="Drugs">Rest, Hydration (Psychostimulants like Methylphenidate rarely)</td>
+              </tr>
+              <tr>
+                <td data-label="Symptom">Cerebral Edema (Brain RT)</td>
+                <td data-label="Drugs">Dexamethasone (steroids)</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
     </main>
   </div>
