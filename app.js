@@ -519,6 +519,15 @@ async function handlePrescriptionSave(event) {
   elements.prescriptionSubmit.disabled = true;
 
   try {
+    const existingPatient = findPatientByMrn(mrn);
+    if (existingPatient && existingPatient.name.toLowerCase() !== patientName.toLowerCase()) {
+      const confirmMatch = confirm(`WARNING: The MRN "${mrn}" already belongs to a patient named "${existingPatient.name}".\n\nYou typed "${patientName}".\n\nBecause MRN is unique, continuing will add this treatment to ${existingPatient.name}'s record. Do you want to proceed?`);
+      if (!confirmMatch) {
+        elements.prescriptionSubmit.disabled = false;
+        return;
+      }
+    }
+
     let patient = buildPatientRecord({ mrn, name: patientName, visitDate: date });
 
     if (databaseReady) {
@@ -667,15 +676,7 @@ function disableForm(form, disabled) {
 }
 
 function renderStats() {
-  const lowStockCount = state.inventory.filter((item) => item.stock <= item.threshold).length;
-  const today = todayISO();
-  const todayPrescriptions = state.prescriptions.filter((item) => item.date === today).length;
-
-  elements.totalMedicines.textContent = String(state.inventory.length);
-  elements.lowStockCount.textContent = String(lowStockCount);
-  elements.todayPrescriptions.textContent = String(todayPrescriptions);
-  elements.totalPrescriptions.textContent = String(state.prescriptions.length);
-  elements.totalPatients.textContent = String(state.patients.length);
+  // Stat cards removed per user request
 }
 
 function renderInventory() {
@@ -787,10 +788,15 @@ function renderPrescriptions() {
   const patientIds = new Set(getFilteredPatients().map((patient) => patient.id));
   const shouldFilter = Boolean(patientFilter);
 
+  if (!shouldFilter) {
+    elements.prescriptionTable.innerHTML = `<tr><td colspan="8" class="empty-state">Please search for or select a patient to view their treatment history.</td></tr>`;
+    return;
+  }
+
   const prescriptions = state.prescriptions
     .slice()
     .sort((a, b) => b.date.localeCompare(a.date))
-    .filter((entry) => !shouldFilter || patientIds.has(entry.patientId) || matchesSearch(entry.patientMrn, patientFilter));
+    .filter((entry) => patientIds.has(entry.patientId) || matchesSearch(entry.patientMrn, patientFilter));
 
   elements.prescriptionTable.innerHTML = prescriptions.length
     ? prescriptions.map((entry) => `
@@ -805,7 +811,7 @@ function renderPrescriptions() {
         <td data-label="Prescriber">${escapeHtml(entry.prescriber)}</td>
       </tr>
     `).join("")
-    : `<tr><td colspan="8" class="empty-state">No treatment history found.</td></tr>`;
+    : `<tr><td colspan="8" class="empty-state">No treatment history found for this patient.</td></tr>`;
 }
 
 async function adjustStock(id, action) {
@@ -840,8 +846,15 @@ function fillPatientFromRecord(patientId) {
 
   elements.patientMrn.value = patient.mrn;
   elements.patientName.value = patient.name;
+  
+  // Automatically filter the Treatment Log to show this patient's history
+  elements.patientSearch.value = patient.mrn;
+  patientFilter = patient.mrn;
+  renderPatients();
+  renderPrescriptions();
+
   elements.prescribedDrug.focus();
-  setMessage(elements.patientLookupMessage, `Ready to add a new treatment for ${patient.name}.`, "success");
+  setMessage(elements.patientLookupMessage, `Ready to add a new treatment for ${patient.name}. Viewing their history below.`, "success");
 }
 
 function buildPatientRecord({ mrn, name, visitDate }) {
