@@ -554,7 +554,7 @@ async function handlePrescriptionSave(event) {
     render();
   } catch (error) {
     console.error(error);
-    setMessage(elements.patientLookupMessage, "Could not save treatment to Supabase. Check connection and policies.", "error");
+    setMessage(elements.patientLookupMessage, `Error saving treatment: ${error.message}`, "error");
   } finally {
     elements.prescriptionSubmit.disabled = false;
   }
