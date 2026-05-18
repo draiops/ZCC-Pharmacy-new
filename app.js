@@ -78,7 +78,8 @@ const elements = {
   patientName: document.getElementById("patient-name"),
   patientSearch: document.getElementById("patient-search"),
   prescribedDrug: document.getElementById("prescribed-drug"),
-  prescriber: document.getElementById("prescriber")
+  prescriber: document.getElementById("prescriber"),
+  actionPanel: document.querySelector(".action-panel")
 };
 
 elements.prescriptionDate.value = todayISO();
@@ -616,19 +617,20 @@ function render() {
   renderInventory();
   renderPatients();
   renderPrescriptions();
+  renderDrugDropdown();
 }
 
 function toggleRolePermissions() {
   const pharmacist = currentUser.role === "pharmacist";
 
-  disableForm(elements.inventoryForm, !pharmacist);
-  elements.inventorySubmit.textContent = pharmacist ? "Save Medicine" : "Pharmacist Access Only";
+  // Hide the section to add drugs for physicians
+  elements.inventoryForm.style.display = pharmacist ? "flex" : "none";
+  
+  // Hide the section to write treatments for pharmacists
+  elements.actionPanel.style.display = pharmacist ? "none" : "block";
+
   elements.seedReset.disabled = !pharmacist;
   elements.seedReset.title = pharmacist ? "" : "Only pharmacists can reset dashboard data.";
-
-  elements.prescriptionSubmit.textContent = pharmacist
-    ? "Dispense / Record Treatment"
-    : "Issue Treatment";
 }
 
 function disableForm(form, disabled) {
@@ -681,6 +683,24 @@ function renderInventory() {
   elements.inventoryTable.querySelectorAll("button[data-action]").forEach((button) => {
     button.addEventListener("click", () => adjustStock(button.dataset.id, button.dataset.action));
   });
+}
+
+function renderDrugDropdown() {
+  const currentValue = elements.prescribedDrug.value;
+  const options = state.inventory
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((item) => {
+      const stockInfo = item.stock > 0 ? `${item.stock} in stock` : "Out of stock";
+      return `<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)} (${stockInfo})</option>`;
+    })
+    .join("");
+    
+  elements.prescribedDrug.innerHTML = `<option value="">Select a medicine...</option>\n${options}`;
+  
+  if (currentValue && state.inventory.some(item => item.name === currentValue)) {
+    elements.prescribedDrug.value = currentValue;
+  }
 }
 
 function renderPatients() {
