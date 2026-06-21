@@ -14,10 +14,20 @@ const users = [
   { full_name: "Dr. Bamo Muhsin",   username: "bamo.muhsin",  role: "physician",   email: "bamo.muhsin@clinic.local",   password: "Dr.Bamo@2024"   },
   { full_name: "Dr. Ariwan Saeed",  username: "ariwan.saeed", role: "physician",   email: "ariwan.saeed@clinic.local",  password: "Dr.Ariwan@2024" },
   { full_name: "Dr. Shwan Ali",     username: "shwan.ali",    role: "physician",   email: "shwan.ali@clinic.local",     password: "Dr.Shwan@2024"  },
+  { full_name: "Dr. Hawbir Ahmed",  username: "hawbir.ahmed", role: "physician",   email: "hawbir.ahmed@clinic.local",  password: "Dr.Hawbir@2024" },
+  { full_name: "Dr. Hanan Asas",    username: "hanan.asas",   role: "physician",   email: "hanan.asas@clinic.local",    password: "Dr.Hanan@2024"  },
+  { full_name: "Dr. Baxan Mahmood", username: "baxan.mahmood", role: "physician",  email: "baxan.mahmood@clinic.local", password: "Dr.Baxan@2024"  },
+  { full_name: "Dr. Sahar Osama",  username: "sahar.osama",  role: "physician",   email: "sahar.osama@clinic.local",   password: "Dr.Sahar@2024"  },
+  { full_name: "Dr. Jalil Salih",   username: "jalil.salih",  role: "physician",   email: "jalil.salih@clinic.local",   password: "Dr.Jalil@2024"  },
+  { full_name: "Dr. Lana Babahaji", username: "lana.babahaji", role: "physician", email: "lana.babahaji@clinic.local", password: "Dr.Lana@2024"   },
+  { full_name: "Dr. Karzan Murad",  username: "karzan.murad", role: "physician",  email: "karzan.murad@clinic.local",  password: "Dr.Karzan@2024" },
+  { full_name: "Dr. Nyan Osman",   username: "nyan.osman",   role: "physician",   email: "nyan.osman@clinic.local",    password: "Dr.Nyan@2024"   },
   // Pharmacists
   { full_name: "Pharmacist One",    username: "pharmacist1",  role: "pharmacist",  email: "pharmacist1@clinic.local",   password: "Pharm1@2024"    },
   { full_name: "Pharmacist Two",    username: "pharmacist2",  role: "pharmacist",  email: "pharmacist2@clinic.local",   password: "Pharm2@2024"    },
   { full_name: "Bestwn",            username: "bestwn",       role: "pharmacist",  email: "bestwn@clinic.local",        password: "Bestwn@2024"    },
+  { full_name: "Baxtyar",           username: "baxtyar",      role: "pharmacist",  email: "baxtyar@clinic.local",       password: "Baxtyar@2024"   },
+  { full_name: "Amanj",             username: "amanj",        role: "pharmacist",  email: "amanj@clinic.local",         password: "Amanj@2024"     },
 ];
 
 // ── Helper ────────────────────────────────────────────────────────────────────
