@@ -448,13 +448,14 @@ async function handleLogin(event) {
 
 async function handleInventorySave(event) {
   event.preventDefault();
+  const form = event.currentTarget;
 
   if (!currentUser || currentUser.role !== "pharmacist") {
     alert("Only pharmacists can update inventory.");
     return;
   }
 
-  const formData = new FormData(event.currentTarget);
+  const formData = new FormData(form);
   const name = readString(formData, "drug-name");
   const category = readString(formData, "drug-category");
   const addedStock = readNumber(formData, "drug-stock");
@@ -493,7 +494,7 @@ async function handleInventorySave(event) {
     }
 
     persistLocalState();
-    event.currentTarget.reset();
+    form.reset();
     render();
   } catch (error) {
     console.error(error);
@@ -505,8 +506,9 @@ async function handleInventorySave(event) {
 
 async function handlePrescriptionSave(event) {
   event.preventDefault();
+  const form = event.currentTarget;
 
-  const formData = new FormData(event.currentTarget);
+  const formData = new FormData(form);
   const date = readString(formData, "prescription-date") || todayISO();
   const mrn = normalizeMrn(readString(formData, "patient-mrn"));
   const patientName = readString(formData, "patient-name");
@@ -558,7 +560,7 @@ async function handlePrescriptionSave(event) {
     await dispenseInventoryItem(prescription.drugName);
 
     persistLocalState();
-    event.currentTarget.reset();
+    form.reset();
     elements.prescriptionDate.value = todayISO();
     elements.prescriber.value = currentUser?.name || "";
     setMessage(elements.patientLookupMessage, `Treatment saved for ${patient.name} (${patient.mrn}).`, "success");
